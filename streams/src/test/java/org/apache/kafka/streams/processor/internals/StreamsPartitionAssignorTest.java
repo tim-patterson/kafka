@@ -319,9 +319,9 @@ public class StreamsPartitionAssignorTest {
             previousAssignment,
             assignTasksToThreads(
                 allTasks,
-                emptySet(),
                 consumers,
-                state
+                state,
+                mkMap()
             )
         );
     }
@@ -353,9 +353,9 @@ public class StreamsPartitionAssignorTest {
         final Map<String, List<TaskId>> newAssignment =
             assignTasksToThreads(
                 allTasks,
-                emptySet(),
                 consumers,
-                state
+                state,
+                mkMap()
             );
 
         previousAssignment.get(CONSUMER_2).add(newTask);
@@ -386,9 +386,9 @@ public class StreamsPartitionAssignorTest {
 
         final Map<String, List<TaskId>> assignment = assignTasksToThreads(
             allTasks,
-            emptySet(),
             consumers,
-            state
+            state,
+            mkMap()
         );
 
         // Each member should have all of its previous tasks reassigned plus some of consumer 3's tasks
@@ -426,9 +426,9 @@ public class StreamsPartitionAssignorTest {
 
         final Map<String, List<TaskId>> assignment = assignTasksToThreads(
             allTasks,
-            emptySet(),
             consumers,
-            state
+            state,
+            mkMap()
         );
 
         // we should move one task each from consumer 1 and consumer 3 to the new member, and none from consumer 2
@@ -466,9 +466,9 @@ public class StreamsPartitionAssignorTest {
         final Map<String, List<TaskId>> interleavedTaskIds =
             assignTasksToThreads(
                 allTasks,
-                emptySet(),
                 consumers,
-                state
+                state,
+                mkMap()
             );
 
         assertThat(interleavedTaskIds, equalTo(assignment));
