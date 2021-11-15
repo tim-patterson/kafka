@@ -22,8 +22,12 @@ import org.apache.kafka.streams.processor.internals.assignment.AssignorConfigura
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.SortedMap;
@@ -61,10 +65,9 @@ public class HighAvailabilityTaskAssignor implements TaskAssignor {
 
         final AtomicInteger remainingWarmupReplicas = new AtomicInteger(configs.maxWarmupReplicas);
 
-        final Map<TaskId, SortedSet<UUID>> tasksToCaughtUpClients = tasksToCaughtUpClients(
+        final Map<TaskId, List<UUID>> tasksToClientsByLag = tasksToClientsByLag(
             statefulTasks,
-            clientStates,
-            configs.acceptableRecoveryLag
+            clientStates
         );
 
         // We temporarily need to know which standby tasks were intended as warmups
@@ -75,17 +78,19 @@ public class HighAvailabilityTaskAssignor implements TaskAssignor {
         final Map<UUID, Set<TaskId>> warmups = new TreeMap<>();
 
         final int neededActiveTaskMovements = assignActiveTaskMovements(
-            tasksToCaughtUpClients,
+            tasksToClientsByLag,
             clientStates,
             warmups,
-            remainingWarmupReplicas
+            remainingWarmupReplicas,
+            configs.acceptableRecoveryLag
         );
 
         final int neededStandbyTaskMovements = assignStandbyTaskMovements(
-            tasksToCaughtUpClients,
+            tasksToClientsByLag,
             clientStates,
+            warmups,
             remainingWarmupReplicas,
-            warmups
+            configs.acceptableRecoveryLag
         );
 
         assignStatelessActiveTasks(clientStates, diff(TreeSet::new, allTaskIds, statefulTasks));
@@ -232,25 +237,26 @@ public class HighAvailabilityTaskAssignor implements TaskAssignor {
         }
     }
 
-    private static Map<TaskId, SortedSet<UUID>> tasksToCaughtUpClients(final Set<TaskId> statefulTasks,
-                                                                       final Map<UUID, ClientState> clientStates,
-                                                                       final long acceptableRecoveryLag) {
-        final Map<TaskId, SortedSet<UUID>> taskToCaughtUpClients = new HashMap<>();
+    private static Map<TaskId, List<UUID>> tasksToClientsByLag(final Set<TaskId> statefulTasks,
+                                                               final Map<UUID, ClientState> clientStates) {
+        final Map<TaskId, List<UUID>> taskToCaughtUpClients = new HashMap<>();
 
         for (final TaskId task : statefulTasks) {
-            final TreeSet<UUID> caughtUpClients = new TreeSet<>();
-            for (final Map.Entry<UUID, ClientState> clientEntry : clientStates.entrySet()) {
-                final UUID client = clientEntry.getKey();
-                final long taskLag = clientEntry.getValue().lagFor(task);
-                if (activeRunning(taskLag) || unbounded(acceptableRecoveryLag) || acceptable(acceptableRecoveryLag, taskLag)) {
-                    caughtUpClients.add(client);
-                }
-            }
-            taskToCaughtUpClients.put(task, caughtUpClients);
-        }
+            final List<Map.Entry<UUID, ClientState>> clients = new ArrayList<>(clientStates.entrySet());
+            Collections.sort(clients, Comparator.comparing(clientEntry ->
+                    clientEntry.getValue().lagFor(task)
+            ));
 
+            final List<UUID> uuids = new ArrayList<>();
+            for (final Map.Entry<UUID, ClientState> clientEntry : clients) {
+                uuids.add(clientEntry.getKey());
+            }
+            taskToCaughtUpClients.put(task, uuids);
+        }
         return taskToCaughtUpClients;
     }
+
+
 
     private static boolean unbounded(final long acceptableRecoveryLag) {
         return acceptableRecoveryLag == Long.MAX_VALUE;
