@@ -102,7 +102,7 @@ public class TaskAssignorConvergenceTest {
         }
 
         private static ClientState emptyInstance(final UUID uuid, final Map<TaskId, Long> allTaskEndOffsetSums) {
-            final ClientState clientState = new ClientState(1);
+            final ClientState clientState = new ClientState(50);
             clientState.computeTaskLags(uuid, allTaskEndOffsetSums);
             return clientState;
         }
@@ -170,7 +170,7 @@ public class TaskAssignorConvergenceTest {
             final Map<UUID, ClientState> newClientStates = new TreeMap<>();
             for (final Map.Entry<UUID, ClientState> entry : clientStates.entrySet()) {
                 final UUID uuid = entry.getKey();
-                final ClientState newClientState = new ClientState(1);
+                final ClientState newClientState = new ClientState(100);
                 final ClientState clientState = entry.getValue();
                 final Map<TaskId, Long> taskOffsetSums = new TreeMap<>();
                 for (final TaskId taskId : clientState.activeTasks()) {

@@ -223,7 +223,7 @@ public class TaskMovementTest {
                 lags.put(task, Long.MAX_VALUE);
             }
         }
-        final ClientState client1 = new ClientState(activeTasks, emptySet(), lags, 1);
+        final ClientState client1 = new ClientState(activeTasks, emptySet(), lags, 10);
         client1.assignActiveTasks(activeTasks);
         return client1;
     }
