@@ -20,6 +20,7 @@ import org.apache.kafka.streams.processor.TaskId;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,6 +39,10 @@ final class TaskMovement {
         this.task = task;
         this.source = source;
         this.destination = destination;
+    }
+
+    public TaskId task() {
+        return task;
     }
 
     private static UUID moreCaughtUpClientIfTaskIsNotCaughtUp(final TaskId task,
@@ -109,6 +114,8 @@ final class TaskMovement {
 
         final int movementsNeeded = taskMovements.size();
 
+        Collections.sort(taskMovements, Comparator.comparing(TaskMovement::task));
+
         for (final TaskMovement movement : taskMovements) {
             final UUID sourceId = movement.source;
             final ClientState source = clientStates.get(sourceId);
@@ -167,6 +174,8 @@ final class TaskMovement {
 
         int movementsNeeded = 0;
 
+        Collections.sort(taskMovements, Comparator.comparing(TaskMovement::task));
+
         for (final TaskMovement movement : taskMovements) {
             final ClientState source = clientStates.get(movement.source);
             if (!source.hasAssignedTask(movement.task)) {
@@ -190,7 +199,11 @@ final class TaskMovement {
                                                  final Set<TaskId> warmups) {
         sourceClientState.assignActive(task);
 
-        if (remainingWarmupReplicas.getAndDecrement() > 0) {
+        if (!(destinationClientState.assignedTaskLoad() < 1.0)) {
+            System.out.println("here");
+        }
+
+        if (destinationClientState.assignedTaskLoad() < 1.0 && remainingWarmupReplicas.getAndDecrement() > 0) {
             destinationClientState.unassignActive(task);
             destinationClientState.assignStandby(task);
             warmups.add(task);
@@ -207,7 +220,11 @@ final class TaskMovement {
                                                   final ClientState destinationClientState) {
         sourceClientState.assignStandby(task);
 
-        if (remainingWarmupReplicas.getAndDecrement() > 0) {
+        if (!(destinationClientState.assignedTaskLoad() < 1.0)) {
+            System.out.println("here");
+        }
+
+        if (destinationClientState.assignedTaskLoad() < 1.0 && remainingWarmupReplicas.getAndDecrement() > 0) {
             // Then we can leave it also assigned to the destination as a warmup
         } else {
             // we have no more warmups to hand out, so we have to try and move it
