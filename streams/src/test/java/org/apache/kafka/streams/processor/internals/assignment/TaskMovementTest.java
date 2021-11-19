@@ -25,7 +25,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.util.Arrays.asList;
 import static java.util.Collections.emptySet;
@@ -50,7 +49,6 @@ import static org.hamcrest.Matchers.is;
 public class TaskMovementTest {
     @Test
     public void shouldAssignTasksToClientsAndReturnFalseWhenAllClientsCaughtUp() {
-        final int maxWarmupReplicas = Integer.MAX_VALUE;
         final Set<TaskId> allTasks = mkSet(TASK_0_0, TASK_0_1, TASK_0_2, TASK_1_0, TASK_1_1, TASK_1_2);
 
         final Map<TaskId, List<UUID>> tasksToClientsByLag = new HashMap<>();
@@ -67,7 +65,6 @@ public class TaskMovementTest {
                 tasksToClientsByLag,
                 getClientStatesMap(client1, client2, client3),
                 new TreeMap<>(),
-                new AtomicInteger(maxWarmupReplicas),
                 100L),
             is(0)
         );
@@ -75,7 +72,6 @@ public class TaskMovementTest {
 
     @Test
     public void shouldAssignAllTasksToClientsAndReturnFalseIfNoClientsAreCaughtUp() {
-        final int maxWarmupReplicas = Integer.MAX_VALUE;
         final Set<TaskId> allTasks = mkSet(TASK_0_0, TASK_0_1, TASK_0_2, TASK_1_0, TASK_1_1, TASK_1_2);
 
         final Map<TaskId, List<UUID>> tasksToClientsByLag = new HashMap<>();
@@ -92,7 +88,6 @@ public class TaskMovementTest {
                 tasksToClientsByLag,
                 getClientStatesMap(client1, client2, client3),
                 new TreeMap<>(),
-                new AtomicInteger(maxWarmupReplicas),
                 100L),
             is(0)
         );
@@ -100,7 +95,6 @@ public class TaskMovementTest {
 
     @Test
     public void shouldMoveTasksToCaughtUpClientsAndAssignWarmupReplicasInTheirPlace() {
-        final int maxWarmupReplicas = Integer.MAX_VALUE;
         final Set<TaskId> allTasks = mkSet(TASK_0_0, TASK_0_1, TASK_0_2);
         final ClientState client1 = getClientStateWithActiveAssignment(mkSet(TASK_0_0), mkSet(TASK_0_0), allTasks);
         final ClientState client2 = getClientStateWithActiveAssignment(mkSet(TASK_0_1), mkSet(TASK_0_2), allTasks);
@@ -119,7 +113,6 @@ public class TaskMovementTest {
                 tasksToClientsByLag,
                 clientStates,
                 new TreeMap<>(),
-                new AtomicInteger(maxWarmupReplicas),
                 100L),
             is(2)
         );
@@ -135,49 +128,7 @@ public class TaskMovementTest {
     }
 
     @Test
-    public void shouldOnlyGetUpToMaxWarmupReplicasAndReturnTrue() {
-        final int maxWarmupReplicas = 1;
-        final Set<TaskId> allTasks = mkSet(TASK_0_0, TASK_0_1, TASK_0_2);
-        final ClientState client1 = getClientStateWithActiveAssignment(mkSet(TASK_0_0), mkSet(TASK_0_0), allTasks);
-        final ClientState client2 = getClientStateWithActiveAssignment(mkSet(TASK_0_1), mkSet(TASK_0_2), allTasks);
-        final ClientState client3 = getClientStateWithActiveAssignment(mkSet(TASK_0_2), mkSet(TASK_0_1), allTasks);
-        final Map<UUID, ClientState> clientStates = getClientStatesMap(client1, client2, client3);
-
-        final Map<TaskId, List<UUID>> tasksToCaughtUpClients = mkMap(
-            mkEntry(TASK_0_0, asList(UUID_1, UUID_2, UUID_3)),
-            mkEntry(TASK_0_1, asList(UUID_3, UUID_1, UUID_2)),
-            mkEntry(TASK_0_2, asList(UUID_2, UUID_1, UUID_3))
-        );
-
-        assertThat(
-            "should have assigned movements",
-            assignActiveTaskMovements(
-                tasksToCaughtUpClients,
-                clientStates,
-                new TreeMap<>(),
-                new AtomicInteger(maxWarmupReplicas),
-                100L),
-            is(2)
-        );
-        // The active tasks have changed to the ones that each client is caught up on
-        assertThat(client1, hasProperty("activeTasks", ClientState::activeTasks, mkSet(TASK_0_0)));
-        assertThat(client2, hasProperty("activeTasks", ClientState::activeTasks, mkSet(TASK_0_2)));
-        assertThat(client3, hasProperty("activeTasks", ClientState::activeTasks, mkSet(TASK_0_1)));
-
-        // we should only assign one warmup, but it could be either one that needs to be migrated.
-        assertThat(client1, hasProperty("standbyTasks", ClientState::standbyTasks, mkSet()));
-        try {
-            assertThat(client2, hasProperty("standbyTasks", ClientState::standbyTasks, mkSet(TASK_0_1)));
-            assertThat(client3, hasProperty("standbyTasks", ClientState::standbyTasks, mkSet()));
-        } catch (final AssertionError ignored) {
-            assertThat(client2, hasProperty("standbyTasks", ClientState::standbyTasks, mkSet()));
-            assertThat(client3, hasProperty("standbyTasks", ClientState::standbyTasks, mkSet(TASK_0_2)));
-        }
-    }
-
-    @Test
     public void shouldNotCountPreviousStandbyTasksTowardsMaxWarmupReplicas() {
-        final int maxWarmupReplicas = 0;
         final Set<TaskId> allTasks = mkSet(TASK_0_0);
         final ClientState client1 = getClientStateWithActiveAssignment(emptySet(), mkSet(TASK_0_0), allTasks);
         client1.assignStandby(TASK_0_0);
@@ -194,7 +145,6 @@ public class TaskMovementTest {
                 tasksToCaughtUpClients,
                 clientStates,
                 new TreeMap<>(),
-                new AtomicInteger(maxWarmupReplicas),
                 100L),
             is(1)
         );
