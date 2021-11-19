@@ -17,7 +17,6 @@
 package org.apache.kafka.streams.processor.internals.assignment;
 
 import org.apache.kafka.streams.processor.TaskId;
-import org.apache.kafka.streams.processor.internals.Task;
 import org.apache.kafka.streams.processor.internals.assignment.AssignorConfiguration.AssignmentConfigs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,11 +34,11 @@ import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.emptySet;
 import static org.apache.kafka.common.utils.Utils.diff;
 import static org.apache.kafka.streams.processor.internals.assignment.TaskMovement.assignActiveTaskMovements;
 import static org.apache.kafka.streams.processor.internals.assignment.TaskMovement.assignStandbyTaskMovements;
@@ -63,8 +62,6 @@ public class HighAvailabilityTaskAssignor implements TaskAssignor {
             configs.numStandbyReplicas
         );
 
-        final AtomicInteger remainingWarmupReplicas = new AtomicInteger(configs.maxWarmupReplicas);
-
         final Map<TaskId, List<UUID>> tasksToClientsByLag = tasksToClientsByLag(
             statefulTasks,
             clientStates
@@ -81,7 +78,6 @@ public class HighAvailabilityTaskAssignor implements TaskAssignor {
             tasksToClientsByLag,
             clientStates,
             warmups,
-            remainingWarmupReplicas,
             configs.acceptableRecoveryLag
         );
 
@@ -89,11 +85,13 @@ public class HighAvailabilityTaskAssignor implements TaskAssignor {
             tasksToClientsByLag,
             clientStates,
             warmups,
-            remainingWarmupReplicas,
             configs.acceptableRecoveryLag
         );
 
         assignStatelessActiveTasks(clientStates, diff(TreeSet::new, allTaskIds, statefulTasks));
+
+        removeWarmupsFromOversubscribedClients(warmups, clientStates);
+        trimWarmupsToMaxCapacity(warmups, clientStates, configs.maxWarmupReplicas);
 
         final boolean probingRebalanceNeeded = neededActiveTaskMovements + neededStandbyTaskMovements > 0;
 
@@ -256,17 +254,39 @@ public class HighAvailabilityTaskAssignor implements TaskAssignor {
         return taskToCaughtUpClients;
     }
 
-
-
-    private static boolean unbounded(final long acceptableRecoveryLag) {
-        return acceptableRecoveryLag == Long.MAX_VALUE;
+    private static void removeWarmupsFromOversubscribedClients(final Map<UUID, Set<TaskId>> warmups,
+                                                               final Map<UUID, ClientState> clientStates) {
+        for (final Map.Entry<UUID, ClientState> clientEntry : clientStates.entrySet()) {
+            final ClientState client = clientEntry.getValue();
+            final UUID clientId = clientEntry.getKey();
+            final Set<TaskId> clientWarmups = warmups.getOrDefault(clientId, emptySet());
+            while (client.assignedTaskCount() > client.capacity() && !clientWarmups.isEmpty()) {
+                final TaskId warmup = Collections.max(clientWarmups, Comparator.comparingLong(client::lagFor).thenComparing(t -> t));
+                clientWarmups.remove(warmup);
+                client.unassignStandby(warmup);
+            }
+        }
     }
 
-    private static boolean acceptable(final long acceptableRecoveryLag, final long taskLag) {
-        return taskLag >= 0 && taskLag <= acceptableRecoveryLag;
-    }
+    private static void trimWarmupsToMaxCapacity(final Map<UUID, Set<TaskId>> warmups,
+                                                 final Map<UUID, ClientState> clientStates,
+                                                 final int maxWarmupReplicas) {
+        int warmupsToRemove = 0;
+        for (final Set<TaskId> tasks : warmups.values()) {
+            warmupsToRemove += tasks.size();
+        }
+        warmupsToRemove -= maxWarmupReplicas;
 
-    private static boolean activeRunning(final long taskLag) {
-        return taskLag == Task.LATEST_OFFSET;
+        for (int i = 0; i < warmupsToRemove; i++) {
+            final UUID clientId = Collections.max(warmups.keySet(),
+                    Comparator.<UUID>comparingDouble(c -> clientStates.get(c).assignedTaskLoad()).thenComparing(c -> c));
+            final ClientState client = clientStates.get(clientId);
+            final Set<TaskId> clientWarmups = warmups.get(clientId);
+            if (!clientWarmups.isEmpty()) {
+                final TaskId warmup = Collections.max(clientWarmups, Comparator.comparing(client::lagFor).thenComparing(t -> t));
+                clientWarmups.remove(warmup);
+                client.unassignStandby(warmup);
+            }
+        }
     }
 }
