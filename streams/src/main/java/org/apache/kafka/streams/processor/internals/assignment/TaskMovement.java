@@ -26,7 +26,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.util.Objects.requireNonNull;
 
@@ -90,7 +89,6 @@ final class TaskMovement {
     static int assignActiveTaskMovements(final Map<TaskId, List<UUID>> tasksToClientsByLag,
                                          final Map<UUID, ClientState> clientStates,
                                          final Map<UUID, Set<TaskId>> warmups,
-                                         final AtomicInteger remainingWarmupReplicas,
                                          final long acceptableRecoveryLag) {
         final List<TaskMovement> taskMovements = new ArrayList<>();
 
@@ -123,7 +121,6 @@ final class TaskMovement {
             if (!source.hasStandbyTask(movement.task)) {
                 // there's not a caught-up standby available to take over the task, so we'll schedule a warmup instead
                 moveActiveAndTryToWarmUp(
-                    remainingWarmupReplicas,
                     movement.task,
                     source,
                     clientStates.get(movement.destination),
@@ -145,7 +142,6 @@ final class TaskMovement {
     static int assignStandbyTaskMovements(final Map<TaskId, List<UUID>> tasksToClientsByLag,
                                           final Map<UUID, ClientState> clientStates,
                                           final Map<UUID, Set<TaskId>> warmups,
-                                          final AtomicInteger remainingWarmupReplicas,
                                           final long acceptableRecoveryLag) {
 
         final List<TaskMovement> taskMovements = new ArrayList<>();
@@ -180,10 +176,9 @@ final class TaskMovement {
             final ClientState source = clientStates.get(movement.source);
             if (!source.hasAssignedTask(movement.task)) {
                 moveStandbyAndTryToWarmUp(
-                        remainingWarmupReplicas,
                         movement.task,
                         source,
-                        clientStates.get(movement.destination)
+                        warmups.computeIfAbsent(movement.destination, x -> new TreeSet<>())
                 );
                 movementsNeeded++;
             }
@@ -192,45 +187,23 @@ final class TaskMovement {
         return movementsNeeded;
     }
 
-    private static void moveActiveAndTryToWarmUp(final AtomicInteger remainingWarmupReplicas,
-                                                 final TaskId task,
+    private static void moveActiveAndTryToWarmUp(final TaskId task,
                                                  final ClientState sourceClientState,
                                                  final ClientState destinationClientState,
                                                  final Set<TaskId> warmups) {
+        // Move active
         sourceClientState.assignActive(task);
-
-        if (!(destinationClientState.assignedTaskLoad() < 1.0)) {
-            System.out.println("here");
-        }
-
-        if (destinationClientState.assignedTaskLoad() < 1.0 && remainingWarmupReplicas.getAndDecrement() > 0) {
-            destinationClientState.unassignActive(task);
-            destinationClientState.assignStandby(task);
-            warmups.add(task);
-        } else {
-            // we have no more standbys or warmups to hand out, so we have to try and move it
-            // to the destination in a follow-on rebalance
-            destinationClientState.unassignActive(task);
-        }
+        destinationClientState.unassignActive(task);
+        // Assign warmup
+        destinationClientState.assignStandby(task);
+        warmups.add(task);
     }
 
-    private static void moveStandbyAndTryToWarmUp(final AtomicInteger remainingWarmupReplicas,
-                                                  final TaskId task,
+    private static void moveStandbyAndTryToWarmUp(final TaskId task,
                                                   final ClientState sourceClientState,
-                                                  final ClientState destinationClientState) {
+                                                  final Set<TaskId> warmups) {
         sourceClientState.assignStandby(task);
-
-        if (!(destinationClientState.assignedTaskLoad() < 1.0)) {
-            System.out.println("here");
-        }
-
-        if (destinationClientState.assignedTaskLoad() < 1.0 && remainingWarmupReplicas.getAndDecrement() > 0) {
-            // Then we can leave it also assigned to the destination as a warmup
-        } else {
-            // we have no more warmups to hand out, so we have to try and move it
-            // to the destination in a follow-on rebalance
-            destinationClientState.unassignStandby(task);
-        }
+        warmups.add(task);
     }
 
     private static void swapStandbyAndActive(final TaskId task,
