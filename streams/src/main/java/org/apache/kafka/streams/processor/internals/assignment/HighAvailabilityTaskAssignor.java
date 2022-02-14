@@ -235,6 +235,15 @@ public class HighAvailabilityTaskAssignor implements TaskAssignor {
     private static Map<TaskId, SortedSet<UUID>> tasksToCaughtUpClients(final Set<TaskId> statefulTasks,
                                                                        final Map<UUID, ClientState> clientStates,
                                                                        final long acceptableRecoveryLag) {
+        final Map<TaskId, Long> taskToHeadLag = new HashMap<>();
+        for (final TaskId task : statefulTasks) {
+            final long taskHeadLag = clientStates.values().stream().mapToLong(clientState -> {
+                final long taskLag = clientState.lagFor(task);
+                return activeRunning(taskLag) ? 0 : taskLag;
+            }).min().orElse(0L);
+            taskToHeadLag.put(task, taskHeadLag);
+        }
+
         final Map<TaskId, SortedSet<UUID>> taskToCaughtUpClients = new HashMap<>();
 
         for (final TaskId task : statefulTasks) {
@@ -242,7 +251,9 @@ public class HighAvailabilityTaskAssignor implements TaskAssignor {
             for (final Map.Entry<UUID, ClientState> clientEntry : clientStates.entrySet()) {
                 final UUID client = clientEntry.getKey();
                 final long taskLag = clientEntry.getValue().lagFor(task);
-                if (activeRunning(taskLag) || unbounded(acceptableRecoveryLag) || acceptable(acceptableRecoveryLag, taskLag)) {
+                if (activeRunning(taskLag)
+                        || unbounded(acceptableRecoveryLag)
+                        || acceptable(acceptableRecoveryLag, taskLag - taskToHeadLag.get(task))) {
                     caughtUpClients.add(client);
                 }
             }
